@@ -1,41 +1,41 @@
-// news-image-20261124 entry (Node 22, standard library only).
-// The front page lives beside this file as entry.png: JPEG bytes under
-// the entry.png name, which the competition allows (the format is told
-// apart by magic bytes, not by extension). This program writes those
-// exact bytes to /output/entry.png, so both grader runs produce the
-// same file. No network, no dependencies, no randomness.
-//
-// Local check: MAKEFUN_OUTPUT_DIR=out node main.ts
+// news-image-20261125 entrypoint (Node 22, standard library only).
+// The front page was rendered beforehand and sits next to this file as
+// entry.png. This program hands those exact bytes to the grader: it
+// checks the file is a JPEG inside the size cap, drops it into the
+// output directory, then reads it back and proves the copy matches.
+// Nothing is fetched, generated, or random here.
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+const MAX_BYTES = 1024 * 1024;
+const JPEG_PREFIX = Buffer.from([0xff, 0xd8, 0xff]);
 
-const here = dirname(fileURLToPath(import.meta.url));
-const sourcePath = resolve(here, 'entry.png');
-const outDir = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
-const outPath = resolve(outDir, 'entry.png');
+const base = dirname(fileURLToPath(import.meta.url));
+const source = join(base, "entry.png");
+const outDir = process.env.MAKEFUN_OUTPUT_DIR ?? "/output";
+const target = join(outDir, "entry.png");
 
-const image = await readFile(sourcePath);
-const size = (await stat(sourcePath)).size;
-
-// The entry must be a JPEG (FF D8 FF magic) inside the 1 MiB limit.
-const isJpeg = image.length >= 3 && image[0] === 0xff && image[1] === 0xd8 && image[2] === 0xff;
-if (!isJpeg) {
-  throw new Error(`entry.png is not a JPEG (first bytes: ${image.subarray(0, 3).toString('hex')})`);
-}
-if (size > 1048576) {
-  throw new Error(`entry.png is ${size} bytes, over the 1048576-byte limit`);
+function fail(message: string): never {
+  console.error(`news-image-20261125: ${message}`);
+  process.exit(1);
 }
 
-await mkdir(outDir, { recursive: true });
-await writeFile(outPath, image);
+if (!existsSync(source)) fail(`missing input image: ${source}`);
 
-// Read the written file back and compare it byte for byte, so a
-// partial or corrupted write fails loudly instead of silently
-// reaching the grader.
-const written = await readFile(outPath);
-if (!Buffer.from(written).equals(image)) {
-  throw new Error('written entry.png does not match the source bytes');
+const picture = readFileSync(source);
+if (picture.length === 0 || picture.length > MAX_BYTES) {
+  fail(`input image is ${picture.length} bytes; limit is ${MAX_BYTES}`);
 }
-console.log(`wrote ${outPath} (${written.length} bytes, identical to source)`);
+if (!picture.subarray(0, 3).equals(JPEG_PREFIX)) {
+  fail("input image does not start with the JPEG magic bytes");
+}
+
+mkdirSync(outDir, { recursive: true });
+writeFileSync(target, picture);
+
+const written = readFileSync(target);
+if (!written.equals(picture)) fail("read-back check failed: output differs from input");
+const digest = createHash("sha256").update(written).digest("hex");
+console.log(`wrote ${target} (${written.length} bytes, sha256 ${digest})`);
